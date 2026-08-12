@@ -1,0 +1,142 @@
+#!/usr/bin/python3
+"""Diagnostics for the Kensington VeriMark Desktop 2.0 libfprint driver.
+
+Talks to the device through libfprint itself, so it exercises the same code
+path fprintd and GNOME use. Run as root, or as a user with access to the
+device node.
+"""
+import argparse
+import sys
+
+try:
+    import gi
+    gi.require_version("FPrint", "2.0")
+    from gi.repository import FPrint, GLib
+except (ImportError, ValueError) as exc:
+    sys.exit(f"verimark-diag: python3-gobject with FPrint typelib is required ({exc})")
+
+DRIVER_ID = "verimark"
+
+
+def get_device(any_driver=False):
+    ctx = FPrint.Context()
+    ctx.enumerate()
+    devices = ctx.get_devices()
+
+    if not devices:
+        sys.exit("No fingerprint devices found.\n"
+                 "  - is the reader plugged in?  (lsusb | grep 047d:8228)\n"
+                 "  - is the driver installed?   "
+                 "(ls /usr/lib64/libfprint-2/tod-1/)")
+
+    for dev in devices:
+        if any_driver or dev.get_driver() == DRIVER_ID:
+            return dev
+
+    found = ", ".join(d.get_driver() for d in devices)
+    sys.exit(f"Found fingerprint devices ({found}) but none using the "
+             f"'{DRIVER_ID}' driver.")
+
+
+def cmd_info(args):
+    dev = get_device(args.any)
+    print(f"driver        : {dev.get_driver()}")
+    print(f"device id     : {dev.get_device_id()}")
+    print(f"name          : {dev.get_name()}")
+    print(f"scan type     : {dev.get_scan_type().value_nick}")
+    print(f"enroll stages : {dev.get_nr_enroll_stages()}")
+    print(f"has storage   : {dev.has_storage()}")
+    print(f"has identify  : {dev.supports_identify()}")
+
+    print("\nopening (this runs the SDCP handshake)...")
+    dev.open_sync()
+    print("  session established")
+
+    prints = dev.list_prints_sync()
+    print(f"\ntemplates stored on the sensor: {len(prints)}")
+    for i, p in enumerate(prints):
+        print(f"  [{i}] finger={p.get_finger().value_nick} "
+              f"username={p.get_username()!r}")
+
+    dev.close_sync()
+    print("\nclosed cleanly")
+
+
+def cmd_verify(args):
+    dev = get_device(args.any)
+    dev.open_sync()
+    prints = dev.list_prints_sync()
+
+    if not prints:
+        dev.close_sync()
+        sys.exit("No templates on the sensor — nothing to match against.")
+
+    print(f"{len(prints)} template(s) enrolled.")
+    print(">>> touch the sensor", flush=True)
+
+    match, _ = dev.identify_sync(prints)
+    if match:
+        print(f"MATCH: template index {prints.index(match)}")
+    else:
+        print("no match")
+
+    dev.close_sync()
+
+
+def cmd_enroll(args):
+    dev = get_device(args.any)
+    dev.open_sync()
+
+    stages = dev.get_nr_enroll_stages()
+    print(f"Enrolling. Touch and lift {stages} times.", flush=True)
+
+    template = FPrint.Print.new(dev)
+    template.set_finger(FPrint.Finger.LEFT_INDEX)
+    template.set_username(args.user)
+
+    def progress(_dev, completed, _print, error, _data=None):
+        if error:
+            print(f"  retry ({error.message})", flush=True)
+        else:
+            print(f"  {completed}/{stages}", flush=True)
+
+    try:
+        dev.enroll_sync(template, None, progress, None)
+        print("ENROLLED")
+    except GLib.Error as exc:
+        print(f"enrollment failed: {exc.message}")
+    finally:
+        dev.close_sync()
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--any", action="store_true",
+                        help="use whatever fingerprint device is present, not "
+                             "just the VeriMark")
+    sub = parser.add_subparsers(dest="command")
+
+    p = sub.add_parser("info", help="show device details and stored templates")
+    p.set_defaults(func=cmd_info)
+
+    p = sub.add_parser("verify", help="touch the sensor and report the match")
+    p.set_defaults(func=cmd_verify)
+
+    p = sub.add_parser("enroll", help="enroll a finger (test harness; prefer "
+                                      "GNOME Settings or fprintd-enroll)")
+    p.add_argument("--user", default="verimark-diag-test")
+    p.set_defaults(func=cmd_enroll)
+
+    args = parser.parse_args()
+    if not args.command:
+        args.func = cmd_info
+
+    try:
+        args.func(args)
+    except GLib.Error as exc:
+        sys.exit(f"libfprint error: {exc.message}")
+
+
+if __name__ == "__main__":
+    main()

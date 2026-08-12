@@ -1,0 +1,4 @@
+option('tod_driver_dir',
+  type: 'string',
+  value: '',
+  description: 'Directory libfprint-tod loads drivers from (default: <libdir>/libfprint-2/tod-1)')

@@ -1,0 +1,81 @@
+#!/usr/bin/bash
+# Enable or disable fingerprint authentication for login, sudo and polkit.
+#
+# The RPM calls "enable" on install and "disable" on removal. Run it by hand to
+# flip the setting without touching the package.
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: verimark-setup {enable|disable|status}
+
+  enable   turn on fingerprint authentication (authselect with-fingerprint)
+  disable  turn it off again
+  status   report what is currently configured
+
+Fingerprint auth is additive: your password always keeps working, so a sensor
+that stops responding can never lock you out.
+EOF
+}
+
+have_authselect() {
+  command -v authselect >/dev/null 2>&1 && authselect current >/dev/null 2>&1
+}
+
+feature_enabled() {
+  authselect current 2>/dev/null | grep -q 'with-fingerprint'
+}
+
+case "${1:-}" in
+  enable)
+    if ! have_authselect; then
+      echo "verimark-setup: authselect is not managing this system's PAM config." >&2
+      echo "Enable fingerprint auth however your setup normally does it." >&2
+      exit 1
+    fi
+    if feature_enabled; then
+      echo "Fingerprint authentication is already enabled."
+    else
+      authselect enable-feature with-fingerprint
+      echo "Fingerprint authentication enabled."
+      echo "Enroll a finger with: fprintd-enroll   (or GNOME Settings -> Users)"
+    fi
+    ;;
+
+  disable)
+    if ! have_authselect; then
+      exit 0
+    fi
+    if feature_enabled; then
+      authselect disable-feature with-fingerprint
+      echo "Fingerprint authentication disabled."
+    fi
+    ;;
+
+  status)
+    if have_authselect; then
+      if feature_enabled; then
+        echo "PAM: fingerprint authentication ENABLED"
+      else
+        echo "PAM: fingerprint authentication disabled"
+      fi
+      authselect current
+    else
+      echo "PAM: not managed by authselect"
+    fi
+    echo
+    if [ -e /usr/lib64/libfprint-2/tod-1/libfprint-tod-verimark.so ]; then
+      echo "Driver: installed"
+    else
+      echo "Driver: MISSING from /usr/lib64/libfprint-2/tod-1/"
+    fi
+    systemctl is-active --quiet fprintd && echo "fprintd: running" || echo "fprintd: not running (it is socket/dbus activated, this is normal)"
+    echo
+    fprintd-list "${SUDO_USER:-$USER}" 2>&1 || true
+    ;;
+
+  *)
+    usage
+    exit 1
+    ;;
+esac

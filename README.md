@@ -1,0 +1,112 @@
+# verimark-fprint
+
+A Linux fingerprint driver for the **Kensington VeriMark Desktop 2.0**
+(USB `047d:8228`), with working **enrollment and matching** — no vendor blob,
+no Windows required.
+
+It ships as a [libfprint-tod](https://gitlab.freedesktop.org/3v1n0/libfprint/tree/tod)
+plugin, so it drops in alongside your distribution's libfprint and survives
+updates to it. Once installed, the reader shows up in GNOME Settings and works
+for login, `sudo` and polkit like any supported sensor.
+
+## Why this exists
+
+The VeriMark Desktop 2.0 is Realtek RTS5816-class match-on-chip silicon sold
+under Kensington's USB vendor ID. libfprint already has a `realtek` driver that
+speaks most of its transport, but it does not recognise this device, and three
+of its assumptions are wrong for this firmware. More importantly, the firmware
+refuses to store a template unless the host has completed Microsoft's **Secure
+Device Connection Protocol** handshake.
+
+That last part is the reason this device has been unusable on Linux. libfprint
+has no SDCP support — it was [proposed in 2020](https://gitlab.freedesktop.org/libfprint/libfprint/-/issues/257)
+and never implemented. This driver implements the client side.
+
+Matching is *not* gated by SDCP; only enrollment is. That is a deliberate
+design: an attacker with the device should not be able to silently add their own
+finger. This driver nevertheless verifies the sensor's authentication MAC on
+every match, which is the property SDCP exists to provide.
+
+## Install
+
+```
+sudo dnf install ./verimark-fprint-0.1.0-1.fc44.x86_64.rpm
+```
+
+Installing enables fingerprint authentication for login, sudo and polkit.
+**Your password keeps working either way** — fingerprint auth is additive, so a
+sensor that stops responding can never lock you out. To turn just the
+fingerprint part off:
+
+```
+sudo verimark-setup disable
+```
+
+Then enroll a finger in **GNOME Settings → Users → Fingerprint Login**, or:
+
+```
+fprintd-enroll -f right-index-finger
+```
+
+## Checking it works
+
+```
+sudo verimark-diag info      # device details + templates stored on the sensor
+sudo verimark-diag verify    # touch the sensor, see what it matches
+verimark-setup status        # PAM state, driver presence, enrolled fingers
+```
+
+## Build from source
+
+```
+meson setup build
+ninja -C build
+sudo ninja -C build install
+sudo systemctl try-restart fprintd
+```
+
+Requires `libfprint-tod-devel`, `openssl-devel` (3.0+), `glib2-devel`.
+On Fedora, `libfprint-tod-devel` comes from the
+`copr.fedorainfracloud.org/grahamwhiteuk/libfprint-tod` repository.
+
+To test a build without installing it:
+
+```
+sudo FP_TOD_DRIVERS_DIR=$PWD/build/src verimark-diag info
+```
+
+## Templates enrolled on Windows
+
+The sensor stores templates on-chip, and this driver reads the same table the
+Windows driver writes. A finger enrolled under Windows Hello will be *matched*
+correctly on Linux, but it will not appear as an enrolled print to fprintd,
+because fprintd keeps its own host-side record of which print belongs to which
+user. Enroll fingers on whichever OS you want to use them from, or on both.
+
+## Storage limits
+
+The sensor holds **10 templates**, shared across every OS and user. `verimark-diag
+info` shows how many are in use. Deleting a print in GNOME Settings frees its
+slot on the chip.
+
+## Protocol
+
+See [docs/PROTOCOL.md](docs/PROTOCOL.md) for the wire format, the SDCP key
+schedule, and the specific ways this firmware differs from what upstream
+libfprint's `realtek` driver expects.
+
+## Status and caveats
+
+- Enrollment, matching, listing and deletion all work.
+- Enrollment takes 12 touches. The firmware gives no "enrollment complete"
+  signal, so the count is chosen by the host; 12 is what Windows Hello uses.
+- Only `047d:8228` is claimed. Genuine Realtek-branded sensors are left to
+  libfprint's own `realtek` driver, which is correct for them.
+- Not submitted upstream. The right long-term home for the SDCP client is
+  libfprint itself, where every match-on-chip driver could use it.
+
+## License
+
+LGPL-2.1-or-later, matching libfprint. The driver's structure follows
+libfprint's `realtek` driver; the SDCP implementation is written against
+Microsoft's public specification.
