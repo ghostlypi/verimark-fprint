@@ -18,10 +18,18 @@ except (ImportError, ValueError) as exc:
 DRIVER_ID = "verimark"
 
 
+# The context owns the USB context the devices live on, so it has to outlive
+# every device handed out. Keeping it in a module global is the simplest way
+# to guarantee that against Python's garbage collector.
+_CONTEXT = None
+
+
 def get_device(any_driver=False):
-    ctx = FPrint.Context()
-    ctx.enumerate()
-    devices = ctx.get_devices()
+    global _CONTEXT
+
+    _CONTEXT = FPrint.Context()
+    _CONTEXT.enumerate()
+    devices = _CONTEXT.get_devices()
 
     if not devices:
         sys.exit("No fingerprint devices found.\n"
@@ -45,8 +53,8 @@ def cmd_info(args):
     print(f"name          : {dev.get_name()}")
     print(f"scan type     : {dev.get_scan_type().value_nick}")
     print(f"enroll stages : {dev.get_nr_enroll_stages()}")
-    print(f"has storage   : {dev.has_storage()}")
-    print(f"has identify  : {dev.supports_identify()}")
+    print(f"has storage   : {dev.has_feature(FPrint.DeviceFeature.STORAGE)}")
+    print(f"has identify  : {dev.has_feature(FPrint.DeviceFeature.IDENTIFY)}")
 
     print("\nopening (this runs the SDCP handshake)...")
     dev.open_sync()
