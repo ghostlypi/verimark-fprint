@@ -781,8 +781,10 @@ vm_enroll_run_state (FpiSsm *ssm, FpDevice *dev)
   switch (fpi_ssm_get_cur_state (ssm))
     {
     case VM_ENROLL_NONCE_STATE:
-      param[0] = VM_PURPOSE_ENROLL;
-      vm_cmd (self, VM_ENROLL_NONCE, param, SDCP_RANDOM_LEN, NULL, 0,
+      /* param stays zero. Every other command in the enroll flow carries the
+       * purpose, but this one rejects it: param[0] = 4 comes back status 1 /
+       * error -9 and no nonce. Windows sends zero here too. */
+      vm_cmd (self, VM_ENROLL_NONCE, NULL, SDCP_RANDOM_LEN, NULL, 0,
               FALSE, FALSE, vm_enroll_nonce_cb);
       break;
 

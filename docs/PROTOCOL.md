@@ -47,12 +47,17 @@ with `FP_RTK_MSG_NO_STATUS` for exactly these commands.
 | `45 02` | read | 1206 | SDCP connect response |
 | `85 03` | write | 34 | SDCP reconnect |
 | `45 04` | read | 34 | SDCP reconnect response |
-| `45 09` | read | 32 | enrollment nonce, `param = [purpose]` |
+| `45 09` | read | 32 | enrollment nonce, `param = 0` |
 | `85 0a` | write | 49 | enrollment commit, `param = [subfactor]` |
 | `85 0b` | write | 32 | identify nonce |
 | `45 0c` | read | 74 | identify |
 
 Purposes: `1` verify, `2` identify, `4` enroll.
+
+`45 09` is the exception: it takes no purpose. Passing `4` — the obvious guess,
+and what every neighbouring command wants — is rejected with `status 1,
+error -9` and a zero nonce, which reads exactly like "enrollment is refused"
+rather than "wrong parameter".
 
 Poll states: `3` no finger, `1` finger present, `0` captured.
 
@@ -157,7 +162,7 @@ single exchange, before attempting anything else.
 
 ## Flows
 
-**Enroll** — connect, reconnect, `45 09 param=[4]` for the nonce, then N× of
+**Enroll** — connect, reconnect, `45 09` for the nonce, then N× of
 (`05 05 param=[4,2]`, poll `45 06`, `45 08 param=[4]`), then `45 10` expecting
 `0x0b`, then `85 0a param=[0xf5]` with `enrollment_id || 17 zero bytes`.
 
