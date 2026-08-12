@@ -502,6 +502,42 @@ vm_init_done (FpiSsm *ssm, FpDevice *dev, GError *error)
   fpi_device_open_complete (dev, error);
 }
 
+/*
+ * A client that dies mid-transfer leaves either a stale packet queued on the
+ * input endpoint or the endpoint outright stalled, and every subsequent
+ * command reads one reply out of step. gusb exposes no clear_halt, so drain
+ * what we can and fall back to a device reset.
+ */
+static void
+vm_flush_stale_input (FpDevice *device)
+{
+  for (guint i = 0; i < 8; i++)
+    {
+      g_autoptr(FpiUsbTransfer) transfer = fpi_usb_transfer_new (device);
+      g_autoptr(GError) error = NULL;
+
+      fpi_usb_transfer_fill_bulk (transfer, EP_IN, EP_IN_MAX_BUF_SIZE);
+
+      if (fpi_usb_transfer_submit_sync (transfer, 50, &error))
+        {
+          fp_dbg ("discarded %" G_GSSIZE_FORMAT " stale bytes",
+                  (gssize) transfer->actual_length);
+          continue;
+        }
+
+      /* nothing queued: the normal, healthy case */
+      if (g_error_matches (error, G_USB_DEVICE_ERROR, G_USB_DEVICE_ERROR_TIMED_OUT))
+        return;
+
+      fp_warn ("input endpoint unhealthy (%s); resetting the device",
+               error->message);
+      g_usb_device_reset (fpi_device_get_usb_device (device), NULL);
+      return;
+    }
+
+  fp_warn ("input endpoint kept producing data; continuing anyway");
+}
+
 static void
 vm_open (FpDevice *device)
 {
@@ -514,6 +550,8 @@ vm_open (FpDevice *device)
       fpi_device_open_complete (device, g_steal_pointer (&error));
       return;
     }
+
+  vm_flush_stale_input (device);
 
   g_clear_pointer (&self->sdcp, vm_sdcp_free);
   self->sdcp = vm_sdcp_new ();
@@ -1229,6 +1267,17 @@ fp_device_verimark_class_init (FpDeviceVerimarkClass *klass)
   dev_class->id_table = id_table;
   dev_class->scan_type = FP_SCAN_TYPE_PRESS;
   dev_class->nr_enroll_stages = VM_ENROLL_STAGES;
+
+  /*
+   * Disable libfprint's thermal model. It is a pure time heuristic — nothing
+   * reads an actual temperature — and its 3 minute default is tuned for laptop
+   * image sensors that genuinely heat while scanning. This is a bus-powered
+   * match-on-chip press sensor that simply idles waiting for a finger, so the
+   * model only produces false "disabled to prevent overheating" failures when
+   * a verify sits pending at a login prompt.
+   */
+  dev_class->temp_hot_seconds = -1;
+  dev_class->temp_cold_seconds = -1;
 
   dev_class->open = vm_open;
   dev_class->close = vm_close;
