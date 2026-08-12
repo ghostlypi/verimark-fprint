@@ -973,10 +973,14 @@ vm_identify_cb (FpDeviceVerimark *self, guint8 *data, GError *error)
 
       fpi_device_get_verify_data (dev, &template);
 
+      /*
+       * Report the scanned print either way: libfprint expects it even on a
+       * failed match so that callers can do enroll-duplicate checking.
+       */
       if (template && fp_print_equal (template, match))
         fpi_device_verify_report (dev, FPI_MATCH_SUCCESS, g_steal_pointer (&match), NULL);
       else
-        fpi_device_verify_report (dev, FPI_MATCH_FAIL, NULL, NULL);
+        fpi_device_verify_report (dev, FPI_MATCH_FAIL, g_steal_pointer (&match), NULL);
     }
   else
     {
@@ -1224,6 +1228,15 @@ vm_cancel (FpDevice *device)
   guint8 param[4] = { self->purpose, 0x00, 0x00, 0x00 };
 
   if (!self->purpose)
+    return;
+
+  /*
+   * Only inject a cancel when the bus is idle. This firmware answers strictly
+   * in order, so slipping a command in alongside an in-flight one desyncs
+   * every subsequent reply. When a command is already pending, the cancellable
+   * poll transfer aborts it and the SSM unwinds on its own.
+   */
+  if (self->cmd_ssm != NULL)
     return;
 
   vm_cmd (self, VM_CANCEL_CAPTURE, param, 0, NULL, 0, TRUE, FALSE, NULL);
