@@ -7,16 +7,59 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: verimark-setup {enable|disable|status}
+Usage: verimark-setup {enable|disable|status} [--yes]
 
   enable   turn on fingerprint authentication (authselect with-fingerprint)
   disable  turn it off again
   status   report what is currently configured
 
+  --yes    do not prompt before changing the PAM configuration
+
 Fingerprint auth is additive: your password always keeps working, so a sensor
 that stops responding can never lock you out.
 EOF
 }
+
+# authselect rewrites /etc/dconf/db and runs "dconf update", which pushes a
+# change event for every key into every running GSettings client. On GNOME 50.4
+# that reproducibly segfaults gnome-shell inside update_clock(), which on
+# Wayland ends the session and loses unsaved work. Nothing to do with the
+# fingerprint stack — but it is our command that pulls the trigger, so ask.
+warn_if_session_live() {
+  [ "${assume_yes:-0}" = 1 ] && return 0
+  pgrep -x gnome-shell >/dev/null 2>&1 || return 0
+
+  cat >&2 <<'EOF'
+WARNING: a GNOME session is running.
+
+This command runs authselect, which regenerates the system dconf databases.
+On GNOME 50.4 that has been observed to crash gnome-shell and log you out,
+losing unsaved work. It is a gnome-shell bug, not a fingerprint one, but this
+command is what triggers it.
+
+Safest: save your work, or run this from a TTY (Ctrl-Alt-F3) instead.
+EOF
+
+  if [ ! -t 0 ]; then
+    echo "Not running interactively; refusing. Re-run with --yes to proceed." >&2
+    exit 1
+  fi
+  read -r -p "Continue anyway? [y/N] " reply
+  case "$reply" in
+    [yY]*) return 0 ;;
+    *) echo "Aborted."; exit 1 ;;
+  esac
+}
+
+assume_yes=0
+args=()
+for arg in "$@"; do
+  case "$arg" in
+    --yes|-y) assume_yes=1 ;;
+    *) args+=("$arg") ;;
+  esac
+done
+set -- ${args[@]+"${args[@]}"}
 
 have_authselect() {
   command -v authselect >/dev/null 2>&1 && authselect current >/dev/null 2>&1
@@ -36,6 +79,7 @@ case "${1:-}" in
     if feature_enabled; then
       echo "Fingerprint authentication is already enabled."
     else
+      warn_if_session_live
       authselect enable-feature with-fingerprint
       echo "Fingerprint authentication enabled."
       echo "Enroll a finger with: fprintd-enroll   (or GNOME Settings -> Users)"
@@ -47,6 +91,7 @@ case "${1:-}" in
       exit 0
     fi
     if feature_enabled; then
+      warn_if_session_live
       authselect disable-feature with-fingerprint
       echo "Fingerprint authentication disabled."
     fi

@@ -43,9 +43,10 @@ on Linux without any vendor blob.
 Because it ships as a TOD plugin rather than a libfprint patch, it survives
 distribution updates to libfprint.
 
-Installing this package enables fingerprint authentication for login, sudo and
-polkit. Your password continues to work regardless; run "verimark-setup disable"
-to turn the fingerprint part back off.
+Installing this package does not change your authentication configuration. Run
+"verimark-setup enable" to turn on fingerprint login, sudo and polkit. Your
+password continues to work either way, so a sensor that stops responding can
+never lock you out.
 
 %prep
 %autosetup -n %{name}-%{version}
@@ -66,13 +67,18 @@ fi
 systemctl try-restart fprintd.service >/dev/null 2>&1 || :
 
 if [ $1 -eq 1 ]; then
-    # first install only — never re-enable on upgrade if the admin turned it off
-    %{_bindir}/verimark-setup enable >/dev/null 2>&1 || :
-fi
+    cat <<'EOF'
 
-%preun
-if [ $1 -eq 0 ]; then
-    %{_bindir}/verimark-setup disable >/dev/null 2>&1 || :
+verimark-fprint: driver installed. To turn on fingerprint login/sudo/polkit:
+
+    sudo verimark-setup enable
+
+This is deliberately not done automatically: it runs authselect, which
+regenerates the system dconf databases, and on GNOME 50.4 that has been
+observed to crash gnome-shell and end the session. Run it from a TTY or
+right after a fresh boot, before you have work open.
+
+EOF
 fi
 
 %postun

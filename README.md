@@ -33,14 +33,22 @@ every match, which is the property SDCP exists to provide.
 sudo dnf install ./verimark-fprint-0.1.0-1.fc44.x86_64.rpm
 ```
 
-Installing enables fingerprint authentication for login, sudo and polkit.
-**Your password keeps working either way** — fingerprint auth is additive, so a
-sensor that stops responding can never lock you out. To turn just the
-fingerprint part off:
+Installing only puts the driver in place. To turn on fingerprint
+authentication for login, sudo and polkit:
 
 ```
-sudo verimark-setup disable
+sudo verimark-setup enable     # and "disable" to turn it back off
 ```
+
+**Your password keeps working either way** — fingerprint auth is additive, so a
+sensor that stops responding can never lock you out.
+
+> **Run `verimark-setup enable` from a TTY, or right after a fresh boot.**
+> It calls `authselect`, which regenerates the system dconf databases; on
+> GNOME 50.4 that reliably segfaults `gnome-shell` in `update_clock()` and ends
+> the session, losing unsaved work. It is a gnome-shell bug — the fingerprint
+> stack is not involved — but this is the command that triggers it, so the tool
+> asks before proceeding. The package deliberately does *not* run it for you.
 
 Then enroll a finger in **GNOME Settings → Users → Fingerprint Login**, or:
 
