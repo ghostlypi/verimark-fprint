@@ -132,6 +132,10 @@ libfprint's `realtek` driver expects.
 
 ## License
 
-LGPL-2.1-or-later, matching libfprint. The driver's structure follows
-libfprint's `realtek` driver; the SDCP implementation is written against
-Microsoft's public specification.
+BSD-3-Clause.
+
+The driver is written against libfprint's public device API and loaded by it as
+a plugin; libfprint itself is LGPL-2.1-or-later, which permits exactly that. The
+layout of a match-on-chip driver here follows how libfprint's own `realtek`
+driver is organised, since this device speaks the same transport. The SDCP
+client is written from Microsoft's public specification.

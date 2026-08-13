@@ -1,16 +1,13 @@
 /*
  * Kensington VeriMark Desktop 2.0 fingerprint driver
- * Copyright (C) 2026 Parth
+ *
+ * SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2026, Parth Iyer
  *
  * Protocol constants, reverse engineered from a USB capture of the Windows
  * driver and verified against the hardware. The transport is the Realtek
  * RTS5816-class bulk protocol; enrollment is gated behind Microsoft's Secure
  * Device Connection Protocol (SDCP).
- *
- * This library is free software; you can redistribute it and/or
- * modify it under the terms of the GNU Lesser General Public
- * License as published by the Free Software Foundation; either
- * version 2.1 of the License, or (at your option) any later version.
  */
 
 #pragma once

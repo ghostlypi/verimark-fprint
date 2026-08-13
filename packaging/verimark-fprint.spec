@@ -6,8 +6,8 @@ Version:        0.1.0
 Release:        1%{?dist}
 Summary:        libfprint driver for the Kensington VeriMark Desktop 2.0 fingerprint reader
 
-License:        LGPL-2.1-or-later
-URL:            https://github.com/%{name}
+License:        BSD-3-Clause
+URL:            https://github.com/ghostlypi/verimark-fprint
 Source0:        %{name}-%{version}.tar.gz
 
 BuildRequires:  gcc

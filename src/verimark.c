@@ -1,19 +1,19 @@
 /*
  * Kensington VeriMark Desktop 2.0 fingerprint driver
- * Copyright (C) 2026 Parth
  *
- * Structure follows libfprint's realtek driver (LGPL-2.1+), which speaks the
- * same bulk transport. The differences from it are all firmware-specific and
- * were established from a USB capture of the Windows driver:
+ * SPDX-License-Identifier: BSD-3-Clause
+ * Copyright (c) 2026, Parth Iyer
+ *
+ * Written against libfprint's public device API. The overall shape of a
+ * match-on-chip driver here — the command SSM, the state machines per action —
+ * follows how libfprint's own realtek driver (LGPL-2.1+) is laid out, since
+ * this device speaks the same bulk transport. Everything specific to this
+ * firmware came from a USB capture of the Windows driver:
  *   - the template table stride is 52 bytes, not 35
  *   - start/poll capture carry the purpose in param
  *   - the commit opcode is 85 0a / param 0xf5 / 49 bytes, not 85 21
+ *   - 45 09 takes the target slot, not the purpose
  *   - enrollment is gated behind Microsoft SDCP
- *
- * This library is free software; you can redistribute it and/or
- * modify it under the terms of the GNU Lesser General Public
- * License as published by the Free Software Foundation; either
- * version 2.1 of the License, or (at your option) any later version.
  */
 
 #include "verimark.h"
