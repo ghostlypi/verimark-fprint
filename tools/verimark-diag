@@ -6,6 +6,7 @@ path fprintd and GNOME use. Run as root, or as a user with access to the
 device node.
 """
 import argparse
+import os
 import sys
 
 try:
@@ -117,6 +118,81 @@ def cmd_enroll(args):
         dev.close_sync()
 
 
+FPRINT_STORE = "/var/lib/fprint"
+
+
+def parse_finger(name):
+    """'right-index-finger', 'right-index' and 'RIGHT_INDEX' all work."""
+    key = name.upper().replace("-", "_")
+    if key.endswith("_FINGER"):
+        key = key[: -len("_FINGER")]
+    finger = getattr(FPrint.Finger, key, None)
+    if finger is None or key == "UNKNOWN":
+        valid = ", ".join(f.lower().replace("_", "-")
+                          for f in dir(FPrint.Finger)
+                          if f.isupper() and f != "UNKNOWN")
+        sys.exit(f"verimark-diag: unknown finger {name!r}.\nTry one of: {valid}")
+    return finger
+
+
+def cmd_adopt(args):
+    """Register a template that is already on the sensor with fprintd.
+
+    The sensor stores templates on-chip and hands them back from list_prints
+    with everything needed to match them. What fprintd additionally keeps is a
+    host-side note of which template belongs to which user and finger — that,
+    and only that, is what a template enrolled elsewhere (under Windows, or by
+    another Linux user) is missing. This writes that note.
+    """
+    finger = parse_finger(args.finger)
+    dev = get_device(args.any)
+    dev.open_sync()
+
+    try:
+        prints = dev.list_prints_sync()
+        if not prints:
+            sys.exit("No templates on the sensor — nothing to adopt.")
+
+        if args.no_touch:
+            if args.index is None and len(prints) > 1:
+                sys.exit(f"{len(prints)} templates on the sensor. Re-run without "
+                         f"--no-touch to pick one by touching it, or pass "
+                         f"--index 0..{len(prints) - 1}.")
+            chosen = prints[args.index or 0]
+        else:
+            print(f"{len(prints)} template(s) on the sensor.")
+            print(f">>> touch the sensor with the finger you want registered "
+                  f"as '{args.finger}'", flush=True)
+            chosen, _ = dev.identify_sync(prints)
+            if chosen is None:
+                sys.exit("That finger does not match any template on the sensor.\n"
+                         "It is not enrolled — use 'fprintd-enroll' instead.")
+            print(f"matched template index {prints.index(chosen)}")
+
+        chosen.set_finger(finger)
+        chosen.set_username(args.user)
+        blob = chosen.serialize()
+    finally:
+        dev.close_sync()
+
+    path = os.path.join(FPRINT_STORE, args.user, dev.get_driver(),
+                        dev.get_device_id())
+    os.makedirs(path, mode=0o700, exist_ok=True)
+    target = os.path.join(path, str(int(finger)))
+
+    if os.path.exists(target) and not args.force:
+        sys.exit(f"{target} already exists — pass --force to replace it.")
+
+    with open(target, "wb") as fh:
+        fh.write(blob)
+    os.chmod(target, 0o644)
+
+    print(f"\nregistered as {args.finger} for user {args.user}")
+    print(f"  {target}")
+    print("\nRestart fprintd so it picks this up:")
+    print("  sudo systemctl try-restart fprintd")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -135,6 +211,24 @@ def main():
                                       "GNOME Settings or fprintd-enroll)")
     p.add_argument("--user", default="verimark-diag-test")
     p.set_defaults(func=cmd_enroll)
+
+    p = sub.add_parser("adopt",
+                       help="register a template already on the sensor (e.g. one "
+                            "enrolled under Windows) with fprintd, without "
+                            "re-enrolling it")
+    p.add_argument("--finger", required=True,
+                   help="which finger this template is, e.g. right-index-finger")
+    p.add_argument("--user", default=os.environ.get("SUDO_USER") or
+                   os.environ.get("USER"),
+                   help="user to register it for (default: the invoking user)")
+    p.add_argument("--no-touch", action="store_true",
+                   help="do not ask for a touch; requires a single template or "
+                        "--index")
+    p.add_argument("--index", type=int,
+                   help="template index from 'verimark-diag info', with --no-touch")
+    p.add_argument("--force", action="store_true",
+                   help="replace an existing record for this finger")
+    p.set_defaults(func=cmd_adopt)
 
     args = parser.parse_args()
     if not args.command:

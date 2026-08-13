@@ -83,13 +83,30 @@ To test a build without installing it:
 sudo FP_TOD_DRIVERS_DIR=$PWD/build/src verimark-diag info
 ```
 
-## Templates enrolled on Windows
+## Templates enrolled elsewhere
 
 The sensor stores templates on-chip, and this driver reads the same table the
-Windows driver writes. A finger enrolled under Windows Hello will be *matched*
-correctly on Linux, but it will not appear as an enrolled print to fprintd,
-because fprintd keeps its own host-side record of which print belongs to which
-user. Enroll fingers on whichever OS you want to use them from, or on both.
+Windows driver writes. A finger enrolled under Windows Hello is therefore
+already usable — it just isn't *claimed* by anyone, because fprintd separately
+keeps a host-side note of which template belongs to which user and finger.
+
+`verimark-diag adopt` writes that note, so an existing template can be used for
+login without re-enrolling it:
+
+```
+sudo systemctl stop fprintd
+sudo verimark-diag adopt --finger right-index-finger
+sudo systemctl start fprintd
+```
+
+It asks for a touch and adopts whichever template you actually match, so the
+finger you name is the finger you get. With a single template on the sensor,
+`--no-touch` skips that. New fingers still enroll normally — adoption and
+enrollment are independent.
+
+Nothing is copied off the sensor by this: the host record holds the same
+`SHA-256(enrollment_id)` the chip already returns from a plain template
+listing, which is what matching compares anyway.
 
 ## Storage limits
 
