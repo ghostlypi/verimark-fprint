@@ -47,6 +47,33 @@ def get_device(any_driver=False):
              f"'{DRIVER_ID}' driver.")
 
 
+def host_records(dev):
+    """Every print fprintd has on disk for this device, as (user, finger, print).
+
+    A template on the sensor is inert until one of these exists: fprintd hands
+    pam_fprintd only the records belonging to the user being authenticated, and
+    the driver requires the sensor's answer to equal one of them. Reading the
+    store needs root, so a non-root run just reports nothing rather than
+    claiming everything is unclaimed.
+    """
+    found = []
+    driver, dev_id = dev.get_driver(), dev.get_device_id()
+
+    for user in sorted(os.listdir(FPRINT_STORE)) if os.access(FPRINT_STORE, os.R_OK) else []:
+        path = os.path.join(FPRINT_STORE, user, driver, dev_id)
+        if not os.path.isdir(path):
+            continue
+        for entry in sorted(os.listdir(path)):
+            try:
+                with open(os.path.join(path, entry), "rb") as fh:
+                    stored = FPrint.Print.deserialize(fh.read())
+            except (OSError, GLib.Error):
+                continue
+            found.append((user, stored.get_finger().value_nick, stored))
+
+    return found
+
+
 def cmd_info(args):
     dev = get_device(args.any)
     print(f"driver        : {dev.get_driver()}")
@@ -62,10 +89,17 @@ def cmd_info(args):
     print("  session established")
 
     prints = dev.list_prints_sync()
+    claims = host_records(dev)
+
     print(f"\ntemplates stored on the sensor: {len(prints)}")
     for i, p in enumerate(prints):
-        print(f"  [{i}] finger={p.get_finger().value_nick} "
-              f"username={p.get_username()!r}")
+        owner = next(((u, f) for u, f, rec in claims if rec.equal(p)), None)
+        if owner:
+            print(f"  [{i}] claimed by {owner[0]} as {owner[1]}")
+        else:
+            print(f"  [{i}] UNCLAIMED — on the sensor, but no host record.")
+            print(f"       It cannot authenticate anyone. Enrolled under another")
+            print(f"       OS or user; 'verimark-diag adopt' would claim it.")
 
     dev.close_sync()
     print("\nclosed cleanly")

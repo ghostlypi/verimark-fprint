@@ -108,6 +108,55 @@ Nothing is copied off the sensor by this: the host record holds the same
 `SHA-256(enrollment_id)` the chip already returns from a plain template
 listing, which is what matching compares anyway.
 
+## What a template on the sensor can and cannot do
+
+A template sitting on the sensor authenticates nobody. The sensor is shared —
+across operating systems, across user accounts, and across anyone who has
+physical possession of it — so a template alone is treated as a claim, not a
+credential.
+
+What makes one usable is a *host record*: a file under
+`/var/lib/fprint/<user>/verimark/<device>/<finger>`, in a directory that is
+`0700 root:root`. fprintd hands pam_fprintd only the records belonging to the
+user being authenticated, and this driver requires the sensor's answer to equal
+one of them. `verimark-diag info` shows which templates are claimed:
+
+```
+templates stored on the sensor: 4
+  [0] claimed by pi as right-index
+  [1] claimed by pi as left-index
+  [2] UNCLAIMED — on the sensor, but no host record.
+  [3] UNCLAIMED — on the sensor, but no host record.
+```
+
+So a finger enrolled under Windows, or by another user, or by someone who
+walked up with the reader, cannot log you in. Claiming one takes root — which
+is to say, it takes an administrator deciding to.
+
+Forging a claim is not practical either. The host record stores
+`SHA-256(enrollment_id)`, and `enrollment_id` is
+`HMAC(MAC_secret, "enroll\0" || nonce)` where `MAC_secret` comes from an
+ephemeral ECDH exchange. Anyone can enroll their own finger into a free slot,
+but they cannot produce one whose hash matches an existing record, and the raw
+identifier is never stored on the chip.
+
+What an attacker with the device *can* do is fill the ten slots, or delete
+templates. Both are denial of service, not impersonation.
+
+### Fingerprint at the login screen
+
+On a Fedora system with `with-fingerprint` enabled, GDM will accept a
+fingerprint at the *initial* login, not just to unlock a running session —
+`/etc/pam.d/gdm-fingerprint` runs `pam_fprintd` on its own. From a cold boot,
+your finger alone gets in; no password is required first.
+
+That is the distribution default, and it is a deliberate trade. Note that GNOME
+uses the same `gdm-fingerprint` stack for unlocking a running session as it does
+for logging in, so simply disabling it removes fingerprint unlock too — leaving
+the reader useful only for `sudo` and polkit. Getting "password once per boot,
+fingerprint thereafter" requires distinguishing the two by whether the user
+already has a session, which this package does not currently do.
+
 ## Storage limits
 
 The sensor holds **10 templates**, shared across every OS and user. `verimark-diag
