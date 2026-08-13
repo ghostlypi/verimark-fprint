@@ -53,6 +53,7 @@ struct _FpDeviceVerimark
   gint            enroll_stage;
   gint            max_enroll_stage;
   guint8          enrollment_id[SDCP_SECRET_LEN];
+  guint8          enroll_slot;
   guint8          identify_nonce[SDCP_RANDOM_LEN];
   guint8          template_table[VM_TEMPLATE_TABLE_LEN];
   gint            delete_slot;
@@ -652,7 +653,8 @@ vm_poll_done (FpDeviceVerimark *self, guint8 *data, GError *error, gint poll_sta
 /* ------------------------------------------------------------------------ */
 
 enum {
-  VM_ENROLL_NONCE_STATE = 0,
+  VM_ENROLL_FIND_SLOT = 0,
+  VM_ENROLL_NONCE_STATE,
   VM_ENROLL_CAPTURE,
   VM_ENROLL_POLL,
   VM_ENROLL_ACCEPT,
@@ -660,6 +662,40 @@ enum {
   VM_ENROLL_COMMIT_STATE,
   VM_ENROLL_NUM_STATES,
 };
+
+/*
+ * 45 09's parameter is the slot the new template will occupy — not the
+ * purpose, which is what every neighbouring command takes. Asking for an
+ * occupied slot is refused with status 1 / error -9 and a zero nonce, which
+ * reads like "enrollment denied" rather than "pick another slot".
+ */
+static void
+vm_enroll_find_slot_cb (FpDeviceVerimark *self, guint8 *data, GError *error)
+{
+  if (error)
+    {
+      fpi_ssm_mark_failed (self->task_ssm, error);
+      return;
+    }
+
+  for (gint i = 0; i < self->slot_count; i++)
+    {
+      if (data[(gsize) i * VM_TEMPLATE_STRIDE + VM_REC_VALID_OFF] != 0)
+        continue;
+
+      self->enroll_slot = i;
+      fp_dbg ("enrolling into free slot %d", i);
+      fpi_ssm_next_state (self->task_ssm);
+      return;
+    }
+
+  fpi_ssm_mark_failed (self->task_ssm,
+                       fpi_device_error_new_msg (FP_DEVICE_ERROR_DATA_FULL,
+                                                 "all %d template slots on the "
+                                                 "sensor are in use; delete a "
+                                                 "fingerprint first",
+                                                 self->slot_count));
+}
 
 static void
 vm_enroll_nonce_cb (FpDeviceVerimark *self, guint8 *data, GError *error)
@@ -780,11 +816,15 @@ vm_enroll_run_state (FpiSsm *ssm, FpDevice *dev)
 
   switch (fpi_ssm_get_cur_state (ssm))
     {
+    case VM_ENROLL_FIND_SLOT:
+      vm_cmd (self, VM_GET_TEMPLATE, NULL,
+              (guint16) (VM_TEMPLATE_STRIDE * self->slot_count),
+              NULL, 0, FALSE, FALSE, vm_enroll_find_slot_cb);
+      break;
+
     case VM_ENROLL_NONCE_STATE:
-      /* param stays zero. Every other command in the enroll flow carries the
-       * purpose, but this one rejects it: param[0] = 4 comes back status 1 /
-       * error -9 and no nonce. Windows sends zero here too. */
-      vm_cmd (self, VM_ENROLL_NONCE, NULL, SDCP_RANDOM_LEN, NULL, 0,
+      param[0] = self->enroll_slot;
+      vm_cmd (self, VM_ENROLL_NONCE, param, SDCP_RANDOM_LEN, NULL, 0,
               FALSE, FALSE, vm_enroll_nonce_cb);
       break;
 

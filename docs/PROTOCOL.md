@@ -47,17 +47,25 @@ with `FP_RTK_MSG_NO_STATUS` for exactly these commands.
 | `45 02` | read | 1206 | SDCP connect response |
 | `85 03` | write | 34 | SDCP reconnect |
 | `45 04` | read | 34 | SDCP reconnect response |
-| `45 09` | read | 32 | enrollment nonce, `param = 0` |
+| `45 09` | read | 32 | enrollment nonce, `param = [target slot]` |
 | `85 0a` | write | 49 | enrollment commit, `param = [subfactor]` |
 | `85 0b` | write | 32 | identify nonce |
 | `45 0c` | read | 74 | identify |
 
 Purposes: `1` verify, `2` identify, `4` enroll.
 
-`45 09` is the exception: it takes no purpose. Passing `4` — the obvious guess,
-and what every neighbouring command wants — is rejected with `status 1,
-error -9` and a zero nonce, which reads exactly like "enrollment is refused"
-rather than "wrong parameter".
+`45 09` is the exception. Its parameter is **the slot the new template will
+occupy**, not a purpose, and the two are easy to confuse because `4` is also
+`PURPOSE_ENROLL` — a host that passes the purpose gets a working enrollment
+into slot 4 and no hint that it asked for anything.
+
+Requesting an occupied slot is refused with `status 1, error -9` and a zeroed
+nonce. That looks identical to "the device is refusing to enroll", so the
+failure appears to be about SDCP, or about device state, or about anything
+other than the parameter — and it only starts happening once the slot in
+question has been filled, which is to say after the first successful
+enrollment. Read the template table with `45 0e`, pick a slot whose valid flag
+is clear, and pass that.
 
 Poll states: `3` no finger, `1` finger present, `0` captured.
 
@@ -162,7 +170,8 @@ single exchange, before attempting anything else.
 
 ## Flows
 
-**Enroll** — connect, reconnect, `45 09` for the nonce, then N× of
+**Enroll** — connect, reconnect, `45 0e` to find a free slot, `45 09
+param=[slot]` for the nonce, then N× of
 (`05 05 param=[4,2]`, poll `45 06`, `45 08 param=[4]`), then `45 10` expecting
 `0x0b`, then `85 0a param=[0xf5]` with `enrollment_id || 17 zero bytes`.
 
